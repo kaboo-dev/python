@@ -16,6 +16,7 @@ import json
 import time
 import unittest
 import uuid
+import random
 
 from kubernetes.client import api_client
 from kubernetes.client.api import core_v1_api
@@ -119,6 +120,56 @@ class TestClient(unittest.TestCase):
 
         resp = api.delete_namespaced_pod(name=name, body={},
                                          namespace='default')
+
+        reqs = [
+            {"data": f"test string {idx}", "channel": random.choice([1, 2])}
+            for idx in range(20)
+        ]
+
+        # Sequential realine_any
+        resp = stream(api.connect_post_namespaced_pod_exec, name, 'default',
+                                                    command='/bin/sh',
+                                                    stderr=True, stdin=True,
+                                                    stdout=True, tty=False,
+                                                    _preload_content=False)
+        for req in reqs:
+            resp.write_stdin(f"echo {req['data']}{'' if req['channel'] == 1 else ' >&2'}\n")
+            line = resp.readline_any(timeout=5)
+            self.assertEqual(req, line)
+        resp.write_stdin("exit\n")
+        resp.update(timeout=5)
+        line = resp.read_channel(ERROR_CHANNEL)
+        status = json.loads(line)
+        self.assertEqual(status['status'], 'Success')
+        resp.update(timeout=5)
+        self.assertFalse(resp.is_open())
+        resp = api.delete_namespaced_pod(name=name, body={},
+                                         namespace='default')
+
+        # One shot realine_any
+        resp = stream(api.connect_post_namespaced_pod_exec, name, 'default',
+                                                    command='/bin/sh',
+                                                    stderr=True, stdin=True,
+                                                    stdout=True, tty=False,
+                                                    _preload_content=False)
+        for req in reqs:
+            resp.write_stdin(f"echo {req['data']}{'' if req['channel'] == 1 else ' >&2'}\n")
+        resp.write_stdin("exit\n")
+        for req in reqs:
+            line = resp.readline_any(timeout=5)
+            self.assertEqual(req, line)
+        resp.write_stdin("exit\n")
+        line = resp.readline_any(timeout=5)
+        self.assertFalse(line)
+        resp.update(timeout=5)
+        line = resp.read_channel(ERROR_CHANNEL)
+        status = json.loads(line)
+        self.assertEqual(status['status'], 'Success')
+        resp.update(timeout=5)
+        self.assertFalse(resp.is_open())
+        resp = api.delete_namespaced_pod(name=name, body={},
+                                         namespace='default')
+
     def test_exit_code(self):
         client = api_client.ApiClient(configuration=self.config)
         api = core_v1_api.CoreV1Api(client)
