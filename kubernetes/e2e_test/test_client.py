@@ -50,6 +50,7 @@ def manifest_with_command(name, command):
         }
     }
 
+
 class TestClient(unittest.TestCase):
 
     @classmethod
@@ -61,7 +62,8 @@ class TestClient(unittest.TestCase):
         api = core_v1_api.CoreV1Api(client)
 
         name = 'busybox-test-' + short_uuid()
-        pod_manifest = manifest_with_command(name, "while true;do date;sleep 5; done")
+        pod_manifest = manifest_with_command(
+            name, "while true;do date;sleep 5; done")
         resp = api.create_namespaced_pod(body=pod_manifest,
                                          namespace='default')
         self.assertEqual(name, resp.metadata.name)
@@ -80,25 +82,25 @@ class TestClient(unittest.TestCase):
                         '-c',
                         'for i in $(seq 1 3); do date; done']
         resp = stream(api.connect_get_namespaced_pod_exec, name, 'default',
-                                                   command=exec_command,
-                                                   stderr=False, stdin=False,
-                                                   stdout=True, tty=False)
+                      command=exec_command,
+                      stderr=False, stdin=False,
+                      stdout=True, tty=False)
         print('EXEC response : %s' % resp)
         self.assertEqual(3, len(resp.splitlines()))
 
         exec_command = 'uptime'
         resp = stream(api.connect_post_namespaced_pod_exec, name, 'default',
-                                                    command=exec_command,
-                                                    stderr=False, stdin=False,
-                                                    stdout=True, tty=False)
+                      command=exec_command,
+                      stderr=False, stdin=False,
+                      stdout=True, tty=False)
         print('EXEC response : %s' % resp)
         self.assertEqual(1, len(resp.splitlines()))
 
         resp = stream(api.connect_post_namespaced_pod_exec, name, 'default',
-                                                    command='/bin/sh',
-                                                    stderr=True, stdin=True,
-                                                    stdout=True, tty=False,
-                                                    _preload_content=False)
+                      command='/bin/sh',
+                      stderr=True, stdin=True,
+                      stdout=True, tty=False,
+                      _preload_content=False)
         resp.write_stdin("echo test string 1\n")
         line = resp.readline_stdout(timeout=5)
         self.assertFalse(resp.peek_stderr())
@@ -126,7 +128,7 @@ class TestClient(unittest.TestCase):
             for idx in range(20)
         ]
 
-        # Sequential realine_any
+        # # Sequential realine_any
         resp = stream(api.connect_post_namespaced_pod_exec, name, 'default',
                                                     command='/bin/sh',
                                                     stderr=True, stdin=True,
@@ -148,20 +150,26 @@ class TestClient(unittest.TestCase):
 
         # One shot realine_any
         resp = stream(api.connect_post_namespaced_pod_exec, name, 'default',
-                                                    command='/bin/sh',
-                                                    stderr=True, stdin=True,
-                                                    stdout=True, tty=False,
-                                                    _preload_content=False)
-        for req in reqs:
-            resp.write_stdin(f"echo {req['data']}{'' if req['channel'] == 1 else ' >&2'}\n")
+                      command='/bin/sh',
+                      stderr=True, stdin=True,
+                      stdout=True, tty=False,
+                      _preload_content=False)
+
+        resp.write_stdin("; ".join(
+            [
+                f"echo {req['data']}{'' if req['channel'] == 1 else ' >&2'}"
+                for req in reqs
+            ]
+        ))
         resp.write_stdin("exit\n")
+
+        lines = []
         for req in reqs:
-            line = resp.readline_any(timeout=5)
-            self.assertEqual(req, line)
-        resp.write_stdin("exit\n")
+            lines.append(resp.readline_any(timeout=5))
+        resp.update(timeout=5)
+        raise ValueError(lines)
         line = resp.readline_any(timeout=5)
         self.assertFalse(line)
-        resp.update(timeout=5)
         line = resp.read_channel(ERROR_CHANNEL)
         status = json.loads(line)
         self.assertEqual(status['status'], 'Success')
@@ -175,7 +183,8 @@ class TestClient(unittest.TestCase):
         api = core_v1_api.CoreV1Api(client)
 
         name = 'busybox-test-' + short_uuid()
-        pod_manifest = manifest_with_command(name, "while true;do date;sleep 5; done")
+        pod_manifest = manifest_with_command(
+            name, "while true;do date;sleep 5; done")
         resp = api.create_namespaced_pod(body=pod_manifest,
                                          namespace='default')
         self.assertEqual(name, resp.metadata.name)
@@ -197,11 +206,16 @@ class TestClient(unittest.TestCase):
             (["/bin/sh", "-c", "ls /"], 0)
         )
         for command, value in commands_expected_values:
-            client = stream(api.connect_get_namespaced_pod_exec, name, 'default',
-                                                       command=command,
-                                                       stderr=True, stdin=False,
-                                                       stdout=True, tty=False,
-                                                       _preload_content=False)
+            client = stream(
+                api.connect_get_namespaced_pod_exec,
+                name,
+                'default',
+                command=command,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _preload_content=False)
 
             self.assertIsNone(client.returncode)
             client.run_forever(timeout=10)
